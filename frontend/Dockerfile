@@ -1,8 +1,12 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
-COPY . .
-RUN npm install && npm run build
-RUN npm install -g serve
 
-CMD ["serve", "-s", "build", "-l", "80"]
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

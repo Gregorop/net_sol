@@ -1,120 +1,122 @@
-import React, { useState, useEffect } from 'react';
-import { api } from './api/requests';
-import { Request, Filters } from './types';
-import RequestList from './components/RequestList';
-import CreateRequest from './components/CreateRequest';
-import FiltersComponent from './components/Filters';
-import AdminLogin from './components/AdminLogin';
+import { useState } from 'react'
+import reactLogo from './assets/react.svg'
+import viteLogo from './assets/vite.svg'
+import heroImg from './assets/hero.png'
+import './App.css'
 
 function App() {
-  const [requests, setRequests] = useState<Request[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [totalItems, setTotalItems] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [filters, setFilters] = useState<Filters>({
-    status: '',
-    priority: '',
-    search: '',
-    sort_by: 'created_at',
-    sort_desc: true,
-    page: 1,
-    limit: 10
-  });
-  const [adminToken, setAdminToken] = useState<string | null>(null);
-
-  const loadRequests = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await api.getRequests(filters);
-      setRequests(data.data);
-      setTotalItems(data.total_items);
-      setTotalPages(data.total_pages);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Ошибка загрузки заявок');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    loadRequests();
-  }, [filters]);
-
-  const handleCreate = async (data: any) => {
-    try {
-      await api.createRequest(data);
-      await loadRequests();
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Ошибка создания');
-    }
-  };
-
-  const handleStatusChange = async (id: number, status: string) => {
-    try {
-      await api.updateStatus(id, status);
-      await loadRequests();
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Ошибка изменения статуса');
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    if (!adminToken) {
-      alert('Требуется вход как админ');
-      return;
-    }
-    if (!confirm('Удалить заявку?')) return;
-    try {
-      await api.deleteRequest(id, adminToken);
-      await loadRequests();
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Ошибка удаления');
-    }
-  };
+  const [count, setCount] = useState(0)
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <h1>Учёт заявок</h1>
-      
-      <AdminLogin onLogin={setAdminToken} onLogout={() => setAdminToken(null)} isAdmin={!!adminToken} />
-      
-      <CreateRequest onCreate={handleCreate} />
-      
-      <FiltersComponent filters={filters} onChange={setFilters} />
-      
-      {error && <div style={{ color: 'red', padding: '10px', background: '#ffebee' }}>{error}</div>}
-      
-      <RequestList
-        requests={requests}
-        loading={loading}
-        onStatusChange={handleStatusChange}
-        onDelete={handleDelete}
-        isAdmin={!!adminToken}
-      />
-      
-      <div style={{ marginTop: '20px', display: 'flex', gap: '10px', justifyContent: 'center' }}>
+    <>
+      <section id="center">
+        <div className="hero">
+          <img src={heroImg} className="base" width="170" height="179" alt="" />
+          <img src={reactLogo} className="framework" alt="React logo" />
+          <img src={viteLogo} className="vite" alt="Vite logo" />
+        </div>
+        <div>
+          <h1>Get started</h1>
+          <p>
+            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
+          </p>
+        </div>
         <button
-          onClick={() => setFilters(f => ({ ...f, page: Math.max(1, f.page - 1) }))}
-          disabled={filters.page === 1}
+          type="button"
+          className="counter"
+          onClick={() => setCount((count) => count + 1)}
         >
-          Предыдущая
+          Count is {count}
         </button>
-        <span>Страница {filters.page} из {totalPages || 1}</span>
-        <button
-          onClick={() => setFilters(f => ({ ...f, page: Math.min(totalPages || 1, f.page + 1) }))}
-          disabled={filters.page >= totalPages}
-        >
-          Следующая
-        </button>
-      </div>
-      
-      <div style={{ marginTop: '10px', textAlign: 'center', color: '#666', fontSize: '14px' }}>
-        Всего: {totalItems} заявок
-      </div>
-    </div>
-  );
+      </section>
+
+      <div className="ticks"></div>
+
+      <section id="next-steps">
+        <div id="docs">
+          <svg className="icon" role="presentation" aria-hidden="true">
+            <use href="/icons.svg#documentation-icon"></use>
+          </svg>
+          <h2>Documentation</h2>
+          <p>Your questions, answered</p>
+          <ul>
+            <li>
+              <a href="https://vite.dev/" target="_blank">
+                <img className="logo" src={viteLogo} alt="" />
+                Explore Vite
+              </a>
+            </li>
+            <li>
+              <a href="https://react.dev/" target="_blank">
+                <img className="button-icon" src={reactLogo} alt="" />
+                Learn more
+              </a>
+            </li>
+          </ul>
+        </div>
+        <div id="social">
+          <svg className="icon" role="presentation" aria-hidden="true">
+            <use href="/icons.svg#social-icon"></use>
+          </svg>
+          <h2>Connect with us</h2>
+          <p>Join the Vite community</p>
+          <ul>
+            <li>
+              <a href="https://github.com/vitejs/vite" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#github-icon"></use>
+                </svg>
+                GitHub
+              </a>
+            </li>
+            <li>
+              <a href="https://chat.vite.dev/" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#discord-icon"></use>
+                </svg>
+                Discord
+              </a>
+            </li>
+            <li>
+              <a href="https://x.com/vite_js" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#x-icon"></use>
+                </svg>
+                X.com
+              </a>
+            </li>
+            <li>
+              <a href="https://bsky.app/profile/vite.dev" target="_blank">
+                <svg
+                  className="button-icon"
+                  role="presentation"
+                  aria-hidden="true"
+                >
+                  <use href="/icons.svg#bluesky-icon"></use>
+                </svg>
+                Bluesky
+              </a>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <div className="ticks"></div>
+      <section id="spacer"></section>
+    </>
+  )
 }
 
-export default App;
+export default App
