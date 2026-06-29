@@ -1,0 +1,34 @@
+version: '3.8'
+services:
+  # 1. Backend Service (FastAPI) - now uses the root Dockerfile.backend
+  backend:
+    build:
+      context: . # Build context from the root directory
+      dockerfile: Dockerfile.backend 
+    ports:
+      - "8000:80" 
+    volumes:
+      - ./backend:/app/backend # Live reloading for development
+    command: uvicorn main:app --host 0.0.0.0 --port 80
+    depends_on:
+      - db
+
+  # 2. Database Service (SQLite)
+  db:
+    image: sqlite:latest
+    volumes:
+      - ./data/sql_app.db:/root/sa.sqlite # Persistent storage for the database
+
+  # 3. Frontend Service (React SPA served by Nginx) - now uses the root Dockerfile.frontend
+  frontend:
+    build:
+      context: . 
+      dockerfile: Dockerfile.frontend 
+    ports:
+      - "3000:80" # Exposing the web server port 3000 on host machine
+    depends_on:
+      - backend
+
+# Volumes for persistent data and code changes
+volumes:
+  db_data:
