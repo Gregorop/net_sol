@@ -1,74 +1,74 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy import case, inspect
+from typing import Optional
 from datetime import datetime
+from contextlib import asynccontextmanager
+import secrets
 
-# Исправляем импорты - убираем точки
 from database import get_db, engine
 from models import Base, Request
 from schemas import RequestCreate, RequestRead, RequestUpdate, PaginatedRequests
+from config import settings
+from enums import RequestStatus, RequestPriority
 
-app = FastAPI(title="Request Tracker API")
+security = HTTPBasic()
 
 
-def is_admin(api_key: str = Depends(lambda: "Bearer SECRET_ADMIN_TOKEN")):
-    """Placeholder for Admin Authentication check."""
-    # Исправляем проверку
-    if api_key != "Bearer correct_password":
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Starting up...")
+    try:
+        print("Creating database tables...")
+        Base.metadata.create_all(bind=engine)
+        print("Database tables ready!")
+    except Exception as e:
+        print(f"Error creating tables: {e}")
+
+    yield
+    print("Shutting down...")
+
+
+app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
+
+
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_username = settings.ADMIN_USERNAME
+    correct_password = settings.ADMIN_PASSWORD
+
+    is_username_correct = secrets.compare_digest(
+        credentials.username.encode("utf-8"), correct_username.encode("utf-8")
+    )
+    is_password_correct = secrets.compare_digest(
+        credentials.password.encode("utf-8"), correct_password.encode("utf-8")
+    )
+
+    if not (is_username_correct and is_password_correct):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Unauthorized: Admin credentials invalid.",
+            detail="Не админ username или password",
+            headers={"WWW-Authenticate": "Basic"},
         )
+
     return True
 
 
 def validate_request_state(request: Request):
-    """Checks core business rules on the request state."""
     if request.status == "done":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot modify requests in 'done' status.",
+            detail="Заявку в статусе done нельзя редактировать или удалять.",
         )
-
-
-# --- 2. API ENDPOINTS ---
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Ensure database tables exist on startup."""
-    print("Creating database tables...")
-    # Исправляем создание таблиц
-    Base.metadata.create_all(bind=engine)
 
 
 @app.post("/requests/", response_model=RequestRead, status_code=status.HTTP_201_CREATED)
 async def create_request(request: RequestCreate, db: Session = Depends(get_db)):
-    """
-    1. Создание заявки.
-    Создает новую запись в БД с учетом бизнес-правил.
-    """
-    # Исправляем проверку статуса
-    valid_statuses = ["new", "in_progress"]
-    valid_priorities = ["low", "normal", "high"]
-
-    if request.status not in valid_statuses:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid initial status. Must be 'new' or 'in_progress'.",
-        )
-
-    if request.priority not in valid_priorities:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid priority. Must be 'low', 'normal', or 'high'.",
-        )
-
     db_request = Request(
         title=request.title,
         description=request.description,
-        status=request.status,
-        priority=request.priority,
+        status=request.status.value,
+        priority=request.priority.value,
     )
     db.add(db_request)
     db.commit()
@@ -80,27 +80,20 @@ async def create_request(request: RequestCreate, db: Session = Depends(get_db)):
 async def list_requests(
     skip: int = 0,
     limit: int = 20,
-    status: Optional[str] = None,
-    priority: Optional[str] = None,
+    status: Optional[RequestStatus] = None,
+    priority: Optional[RequestPriority] = None,
     search: Optional[str] = None,
-    sort_by: str = "created_at",
-    sort_desc: bool = True,
+    sort: str = "-created_at,+priority",  # Формат: "-field1,+field2" (- = DESC, + = ASC)
     db: Session = Depends(get_db),
 ):
-    """
-    2. Просмотр списка заявок.
-    Фильтрация, Поиск, Сортировка, Пагинация.
-    """
     query = db.query(Request)
 
-    # Фильтрация
     if status:
-        query = query.filter(Request.status == status)
+        query = query.filter(Request.status == status.value)
 
     if priority:
-        query = query.filter(Request.priority == priority)
+        query = query.filter(Request.priority == priority.value)
 
-    # Поиск
     if search:
         search_pattern = f"%{search}%"
         query = query.filter(
@@ -108,32 +101,39 @@ async def list_requests(
             | (Request.description.ilike(search_pattern))
         )
 
-    # Сортировка - исправляем
-    if sort_by == "priority":
-        # Простая сортировка по приоритету
-        priority_order = {"low": 0, "normal": 1, "high": 2}
-        # Для SQLite используем CASE
-        from sqlalchemy import case
+    sort_fields = sort.split(",")
+    allowed_fields = {
+        "priority": RequestPriority.get_order(),
+        "created_at": None,
+    }
 
-        priority_case = case(priority_order, value=Request.priority, else_=0)
-        query = query.order_by(
-            priority_case.desc() if sort_desc else priority_case.asc()
-        )
-    elif sort_by in ["created_at", "updated_at"]:
-        column = getattr(Request, sort_by)
-        query = query.order_by(column.desc() if sort_desc else column.asc())
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid sort_by field. Use 'created_at', 'updated_at', or 'priority'.",
-        )
+    order_by_clauses = []
+    for sort_field in sort_fields:
+        descending = sort_field.startswith("-")
+        field_name = sort_field[1:]
 
-    # Пагинация
+        if field_name not in allowed_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Не сортируем  по: {field_name}. Можно по: priority, created_at",
+            )
+
+        if field_name == "priority":
+            priority_order = RequestPriority.get_order()
+            priority_case = case(priority_order, value=Request.priority, else_=0)
+            order_by_clauses.append(
+                priority_case.desc() if descending else priority_case.asc()
+            )
+        else:
+            column = getattr(Request, field_name)
+            order_by_clauses.append(column.desc() if descending else column.asc())
+
+    query = query.order_by(*order_by_clauses)
+
     total_items = query.count()
     data_records = query.offset(skip * limit).limit(limit).all()
 
-    # Исправляем преобразование
-    read_data = [RequestRead.from_orm(record) for record in data_records]
+    read_data = [RequestRead.model_validate(record) for record in data_records]
 
     total_pages = (total_items + limit - 1) // limit if limit > 0 else 1
     return PaginatedRequests(
@@ -149,51 +149,39 @@ async def list_requests(
 async def change_status(
     request_id: int, update: RequestUpdate, db: Session = Depends(get_db)
 ):
-    """
-    6. Изменение статуса заявки.
-    """
     db_request = db.query(Request).filter(Request.id == request_id).first()
     if not db_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена"
         )
 
-    # Валидация
     validate_request_state(db_request)
 
-    # Применение обновления
-    update_data = update.dict(exclude_unset=True)
-    if not update_data:
+    if (update.status is None and update.priority is None) or (
+        db_request.status == update.status and db_request.priority == update.priority
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No fields provided for update.",
+            detail="Нужно поменять хотя бы 1: (status или priority)",
         )
 
-    # Валидация новых значений
-    if "status" in update_data and update_data["status"] not in [
-        "new",
-        "in_progress",
-        "done",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid status. Must be 'new', 'in_progress', or 'done'.",
-        )
+    if update.status:
+        status_order = RequestStatus.get_order()
+        current_status_value = status_order.get(RequestStatus(db_request.status), 0)
+        new_status_value = status_order.get(update.status, 0)
 
-    if "priority" in update_data and update_data["priority"] not in [
-        "low",
-        "normal",
-        "high",
-    ]:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid priority. Must be 'low', 'normal', or 'high'.",
-        )
+        if new_status_value < current_status_value:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Нельзя перевести заявку обратно в другой статус из '{db_request.status}' в '{update.status.value}'.",
+            )
 
-    for key, value in update_data.items():
-        setattr(db_request, key, value)
+        db_request.status = update.status.value
 
-    db_request.updated_at = datetime.utcnow()
+    if update.priority:
+        db_request.priority = update.priority.value
+
+    db_request.updated_at = datetime.now()
 
     try:
         db.commit()
@@ -203,32 +191,44 @@ async def change_status(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error during update: {str(e)}",
+            detail=f"Че то с БД: {str(e)}",
         )
 
 
 @app.delete("/requests/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_request(
     request_id: int,
-    is_admin_auth: bool = Depends(is_admin),
+    admin_auth: bool = Depends(verify_admin),
     db: Session = Depends(get_db),
 ):
-    """
-    7. Удаление заявки (только админом).
-    """
+    if not admin_auth:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Требуются права администратора",
+        )
+
     db_request = db.query(Request).filter(Request.id == request_id).first()
     if not db_request:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Request not found."
+            status_code=status.HTTP_404_NOT_FOUND, detail="Заявка не найдена"
         )
 
-    # Нельзя удалять заявки в статусе 'done'
-    if db_request.status == "done":
+    if db_request.status == RequestStatus.DONE.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot delete requests in 'done' status.",
+            detail="Заявку в статусе done нельзя редактировать или удалять.",
         )
 
     db.delete(db_request)
     db.commit()
-    return None  # 204 No Content
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    try:
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        return {"status": "healthy", "database": "connected", "tables": tables}
+    except Exception as e:
+        return {"status": "unhealthy", "database": "disconnected", "error": str(e)}

@@ -4,3 +4,4 @@ pydantic
 sqlalchemy
 alembic
 python-jose
+python-dotenv
