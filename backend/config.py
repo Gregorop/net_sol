@@ -13,5 +13,11 @@ class Settings:
     APP_NAME: str = os.getenv("APP_NAME", "Request Tracker API")
     DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
 
+    CORS_ORIGINS: list = [
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+    ]
+
 
 settings = Settings()

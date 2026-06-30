@@ -5,8 +5,6 @@ from enums import RequestStatus, RequestPriority
 
 
 class RequestBase(BaseModel):
-    """Base schema for all requests."""
-
     title: str = Field(..., min_length=3, max_length=120)
     description: Optional[str] = Field(None, max_length=1000)
     status: RequestStatus
@@ -19,10 +17,10 @@ class RequestCreate(RequestBase):
 
 class RequestUpdate(BaseModel):
     status: Optional[RequestStatus] = Field(
-        None, description="New status (new, in_progress, done)"
+        None, description=f"New status ({RequestStatus.get_order()})"
     )
     priority: Optional[RequestPriority] = Field(
-        None, description="New priority (low, normal, high)"
+        None, description=f"New priority ({RequestPriority.get_order()})"
     )
 
 
